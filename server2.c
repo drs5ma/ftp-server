@@ -22,16 +22,27 @@
 * }
 */
 
+char *response_150 = "150 file status okay, about to open data connection\r\n";
+char *response_200 = "200 command okay\r\n";
+char *response_215 = "215 UNIX Type: L8\r\n";
+char *response_220 = "220 service ready for new user\r\n";
+char *response_221 = "221 service closing control connection\r\n";
+char *response_226 = "226 closing data connection\r\n";
+char *response_331 = "331 User okay, password required\r\n";
+
+char *response_504 = "504 command not implemented\r\n";
 int main(int argc, char **argv){
 
-  // create new TCP/IP socket
+  // create new TCP/IP socket for control and data connections from client
+  int data_socket; //dont init quite yet, wait for port command
   int server_socket;
   server_socket = socket(AF_INET, SOCK_STREAM, 0);
   if(server_socket==-1){
     printf("socket couldn't be created\n");
     return 0;}
 
-  // populate the server sockaddr_in struct
+  // populate the server sockaddr_in struct 
+  struct sockaddr_in data_addr; //dont init quite yet
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY;
@@ -45,20 +56,19 @@ int main(int argc, char **argv){
     return 0;} 
   
   // listen on the port
-  int backlog = 3;// chnage this to 1 since only supporting one client @ a time?
+  int backlog = 3;// does this change to 1 since only supporting one client @ a time?
   listen(server_socket, backlog);
 
-
-  // create a new client_socket & accept incoming connections
-  printf("Server online  waiting for new connections on port %d  ... \n", atoi(argv[1]));
+  // accept incoming connections
   struct sockaddr_in client;
-  int c = sizeof(struct sockaddr_in);
+  int sockaddr_size = sizeof(struct sockaddr_in);
+  printf("Server online  waiting for new connections on port %d  ... \n", atoi(argv[1]));
   int client_socket = accept(server_socket, 
 			 (struct sockaddr *)&client,  
-			 (socklen_t*)&c);
+			 (socklen_t*)&sockaddr_size);
   if(client_socket<0){
     printf("connection failed\n");return 0;}
-
+  
 
   // parse+print connection info
   char *client_ip = inet_ntoa(client.sin_addr);
@@ -66,34 +76,47 @@ int main(int argc, char **argv){
   printf("Connection accepted from %s port %d\n", client_ip, client_port);
   
   // and send back the Service read for new user code
-  send(client_socket, "220\r\n", 5, 0);
+  send(client_socket, response_220, strlen(response_220), 0);
 
   // prepare for client loop
   int message_size = 1024;
   char client_message[message_size];
   int readlen = 0;
-  memset(client_message, 0, message_size);
+
+  //clear the client_message 
+  memset(client_message, 0, message_size); 
+  // and read the first message from client
   readlen  = read(client_socket, client_message, message_size);
 
-  /*
-   *Client loop
-   */
-
-  int i;printf("Client Msg: ");
+  //print the client_message
+  int i;printf("Client Msg: "); 
   for(i=0;i<readlen;i+=1){printf("%c", client_message[i]);}
-  struct sockaddr_in data_addr;
-  int data_socket;
+
+  /*
+  *  Client loop
+  */
   while(readlen){
+
+    /* 
+    *  Any username/password combination will be accepted
+    */
     if(strncmp("USER", client_message,4)==0){
-      send(client_socket, "331\r\n", 5, 0);
-    }
+      send(client_socket,response_331 , strlen(response_331), 0);}
     else if(strncmp("PASS", client_message,4)==0){
-      send(client_socket, "200\r\n", 5 ,0);
-    }
+      send(client_socket, response_200, strlen(response_200) ,0);}
+
+
+    /* 
+    *  "Remote system type is UNIX."
+    *  "Using binary mode to transfer files."
+    */
     else if(strncmp("SYST", client_message,4)==0){
-      send(client_socket, "I\r\n", 5 ,0);
-      send(client_socket, "200 \r\n", 5, 0);
+      send(client_socket, response_215, strlen(response_215) ,0);
     }
+
+    /*
+    *  open a data connection from port 21 
+    */
     else if(strncmp("PORT", client_message,4)==0){
       int p1,p2;
       sscanf(client_message, "PORT 127,0,0,1,%d,%d\n",&p1,&p2);
@@ -104,38 +127,40 @@ int main(int argc, char **argv){
       if(data_socket==-1){
       	printf("data socket couldn't be created\n");
       	return 0;}
-      
+      //construct the addr to connect to 
       data_addr.sin_family = AF_INET;
       data_addr.sin_addr.s_addr = INADDR_ANY;
       data_addr.sin_port = htons(portno);
-
+      //connect to the client specified port
       if(connect(data_socket, (struct sockaddr *)&data_addr, sizeof(data_addr))<0){
       	printf("error connecting...\n");
       }
       else{
-	printf("connected \n");
-	char *response= "200 response okay\r\n";
-	send(client_socket, response,strlen(response)  ,0);
-	//send(client_socket, "225\r\n", 24 ,0);
-	
+	printf("connected \n"); //send a reassuring 200 response okay
+	send(client_socket, response_200, strlen(response_200)  ,0);	
       }
     }
     else if(strncmp("LIST", client_message,4)==0){
-      send(client_socket, "150\r\n", 5 ,0);
+      send(client_socket,response_150,strlen(response_150) ,0);
       char* msgdata = "directory listingasdfasdfasdfblah\r\nfile 1 34 kb\r\nfile 4 fkls\r\n";
       send(data_socket,msgdata, strlen(msgdata), 0 );    
       close(data_socket);
-      send(client_socket, "226\r\n", 5 ,0);
+      send(client_socket, response_226, strlen(response_226), 0);
+    }
+
+    else if(strncmp("QUIT", client_message, 4)==0){
+      //send them a 221 closing control conneciton command
+      send(client_socket, response_221, strlen(response_221), 0);
     }
     else{
-      //send them a n okay i gues
-      send(client_socket, "200\r\n",5,0);
+      //send them a 504 command not implemented i guess
+      send(client_socket, response_504, strlen(response_504), 0);
     }
-   
+
+   // clear the client_message buffer and get another client_message
    memset(client_message, 0, message_size);
    readlen = recv(client_socket, client_message, message_size, 0);
-   //write(client_socket, client_message, readlen);
-   int i;printf("Client Msg: ");
+   int i;printf("Client Msg: "); // print client message
    for(i=0;i<readlen;i+=1){printf("%c", client_message[i]);}
   }
   
