@@ -65,25 +65,73 @@ int main(int argc, char **argv){
   //send back the Service read for new user code
   send(client_socket, "220\r\n", 5, 0);
 
-
-  // send something to client
-  // char *response = "Hi client, your connected.\n";
-  //write(client_socket, response, strlen(response));
-  
   // put client in an echo loop
   int message_size = 1024;
   char client_message[message_size];
   printf("server made it here\n");
 
-  //int readlen = 0;
-  //readlen  = read(client_socket, client_message, message_size);
-  //printf("buffer: %s\n", client_message);
-  //while(readlen){
-  //readlen = recv(client_socket, client_message, message_size, 0);
-  // write(client_socket, client_message, readlen);
-  // int i;printf("Client Msg: ");
-  // for(i=0;i<readlen;i+=1){printf("%c", client_message[i]);}
-  //}
+  int readlen = 0;
+  memset(client_message, 0, message_size);
+  readlen  = read(client_socket, client_message, message_size);
+  int i;printf("Client Msg: ");
+  for(i=0;i<readlen;i+=1){printf("%c", client_message[i]);}
+  struct sockaddr_in data_addr;
+  int data_socket;
+  while(readlen){
+
+    if(strncmp("USER", client_message,4)==0){
+      send(client_socket, "331\r\n", 5, 0);
+    }
+    else if(strncmp("PASS", client_message,4)==0){
+      send(client_socket, "221\r\n", 5 ,0);
+    }
+    else if(strncmp("SYST", client_message,4)==0){
+      send(client_socket, "I\r\n", 5 ,0);
+    }
+    else if(strncmp("PORT", client_message,4)==0){
+      int p1,p2;
+      sscanf(client_message, "PORT 127,0,0,1,%d,%d\n",&p1,&p2);
+      printf("p1 %d, p2 %d\n", p1, p2);
+      int portno =  p1*256+p2;
+      
+      data_socket = socket(AF_INET, SOCK_STREAM, 0);
+      if(data_socket==-1){
+      	printf("data socket couldn't be created\n");
+      	return 0;}
+      
+      data_addr.sin_family = AF_INET;
+      data_addr.sin_addr.s_addr = INADDR_ANY;
+      data_addr.sin_port = htons(portno);
+
+      if(connect(data_socket, (struct sockaddr *)&data_addr, sizeof(data_addr))<0){
+      	printf("error connecting...\n");
+      }
+      else{
+	printf("connected \n");
+	char *response= "200 response okay\r\n";
+	send(client_socket, response,strlen(response)  ,0);
+	//send(client_socket, "225\r\n", 24 ,0);
+	
+      }
+    }
+    else if(strncmp("LIST", client_message,4)==0){
+      send(client_socket, "150\r\n", 5 ,0);
+      char* msgdata = "directory listingasdfasdfasdfblah\r\nfile 1 34 kb\r\nfile 4 fkls\r\n";
+      send(data_socket,msgdata, strlen(msgdata), 0 );    
+      close(data_socket);
+      send(client_socket, "226\r\n", 5 ,0);
+    }
+    else{
+      //send them a n okay i gues
+      send(client_socket, "200\r\n",5,0);
+    }
+   
+   memset(client_message, 0, message_size);
+   readlen = recv(client_socket, client_message, message_size, 0);
+   //write(client_socket, client_message, readlen);
+   int i;printf("Client Msg: ");
+   for(i=0;i<readlen;i+=1){printf("%c", client_message[i]);}
+  }
   
   return 0;
 
