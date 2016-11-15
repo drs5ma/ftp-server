@@ -31,24 +31,25 @@ int main(int argc, char **argv){
     printf("socket couldn't be created\n");
     return 0;}
 
-  // populate sockaddr_in struct
+  // populate the server sockaddr_in struct
   struct sockaddr_in server_addr;
   server_addr.sin_family = AF_INET;
   server_addr.sin_addr.s_addr = INADDR_ANY;
   server_addr.sin_port = htons(atoi(argv[1]));
 
-  // bind socket to port
+  // bind server socket to port specified
   if( bind(server_socket, 
 	   (struct sockaddr *)&server_addr, 
 	   sizeof(server_addr)) < 0){
     printf("could not bind socket to port\n");
     return 0;} 
   
-  // listen on port
-  int backlog = 3;// why three?
+  // listen on the port
+  int backlog = 3;// chnage this to 1 since only supporting one client @ a time?
   listen(server_socket, backlog);
 
-  // create a new client_socket accept incoming connections
+
+  // create a new client_socket & accept incoming connections
   printf("Server online  waiting for new connections on port %d  ... \n", atoi(argv[1]));
   struct sockaddr_in client;
   int c = sizeof(struct sockaddr_in);
@@ -57,43 +58,48 @@ int main(int argc, char **argv){
 			 (socklen_t*)&c);
   if(client_socket<0){
     printf("connection failed\n");return 0;}
+
+
   // parse+print connection info
   char *client_ip = inet_ntoa(client.sin_addr);
   int client_port = ntohs(client.sin_port);
   printf("Connection accepted from %s port %d\n", client_ip, client_port);
   
-  //send back the Service read for new user code
+  // and send back the Service read for new user code
   send(client_socket, "220\r\n", 5, 0);
 
-  // put client in an echo loop
+  // prepare for client loop
   int message_size = 1024;
   char client_message[message_size];
-  printf("server made it here\n");
-
   int readlen = 0;
   memset(client_message, 0, message_size);
   readlen  = read(client_socket, client_message, message_size);
+
+  /*
+   *Client loop
+   */
+
   int i;printf("Client Msg: ");
   for(i=0;i<readlen;i+=1){printf("%c", client_message[i]);}
   struct sockaddr_in data_addr;
   int data_socket;
   while(readlen){
-
     if(strncmp("USER", client_message,4)==0){
       send(client_socket, "331\r\n", 5, 0);
     }
     else if(strncmp("PASS", client_message,4)==0){
-      send(client_socket, "221\r\n", 5 ,0);
+      send(client_socket, "200\r\n", 5 ,0);
     }
     else if(strncmp("SYST", client_message,4)==0){
       send(client_socket, "I\r\n", 5 ,0);
+      send(client_socket, "200 \r\n", 5, 0);
     }
     else if(strncmp("PORT", client_message,4)==0){
       int p1,p2;
       sscanf(client_message, "PORT 127,0,0,1,%d,%d\n",&p1,&p2);
       printf("p1 %d, p2 %d\n", p1, p2);
       int portno =  p1*256+p2;
-      
+      //we need to open a data connection
       data_socket = socket(AF_INET, SOCK_STREAM, 0);
       if(data_socket==-1){
       	printf("data socket couldn't be created\n");
