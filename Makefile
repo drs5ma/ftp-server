@@ -1,5 +1,5 @@
 all: server2.c
-	gcc -o ftp server2.c
+	gcc -g -o ftp server2.c
 clean:
 	$(RM) fat
 	$(RM) drs5ma.tar

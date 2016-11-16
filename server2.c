@@ -1,7 +1,9 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <dirent.h>
 /*
 * // IPv4 AF_INET sockets:
 *
@@ -142,9 +144,38 @@ int main(int argc, char **argv){
     }
     else if(strncmp("LIST", client_message,4)==0){
       send(client_socket,response_150,strlen(response_150) ,0);
-      char* msgdata = "directory listingasdfasdfasdfblah\r\nfile 1 34 kb\r\nfile 4 fkls\r\n";
-      send(data_socket,msgdata, strlen(msgdata), 0 );    
+      system("ls > /tmp/drs5ma_ftp_server.txt");
+      FILE* tmp = fopen("/tmp/drs5ma_ftp_server.txt", "r");
+      fseek(tmp, 0, SEEK_END);
+      int ls_size = ftell(tmp);
+      fseek(tmp,0,SEEK_SET);
+      char *ls_buffer = malloc(sizeof(char)*ls_size);
+      fread (ls_buffer, sizeof(char), ls_size, tmp);
+
+      //add carriage returns and newlines as well
+      char *ptr = ls_buffer;
+      char *tok = strtok(ptr, "\n");
+      while(tok!=NULL){
+	send(data_socket, tok, strlen(tok), 0 );  
+	send(data_socket, "\r", 1, 0 );  
+	send(data_socket, "\n", 1, 0 );  
+	tok = strtok(NULL, "\n");
+      }
+
+      fclose(tmp);
+      system("rm /tmp/drs5ma_ftp_server.txt");
+      /* DIR *d; */
+      /* struct dirent *dir; */
+      /* d = opendir("."); */
+      /* if(d){ */
+      /* 	while( ( dir=readdir(d) ) != NULL ){ */
+      /* 	  printf("%s\n", dir->d_name); */
+      /* 	  send(data_socket,dir->d_name, strlen(dir->d_name), 0 );  */
+      /* 	  send(data_socket, "\r", 1,0); */
+      /* 	}closedir(d); */
+      /* } */
       close(data_socket);
+      free(ls_buffer);
       send(client_socket, response_226, strlen(response_226), 0);
     }
 
