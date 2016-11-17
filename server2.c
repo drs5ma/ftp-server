@@ -3,7 +3,8 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
-#include <dirent.h>
+#include <error.h>
+
 /*
 * // IPv4 AF_INET sockets:
 *
@@ -24,6 +25,7 @@
 * }
 */
 
+char *response_125 = "125 data connectionopen, transfer starting\r\n";
 char *response_150 = "150 file status okay, about to open data connection\r\n";
 char *response_200 = "200 command okay\r\n";
 char *response_215 = "215 UNIX Type: L8\r\n";
@@ -31,8 +33,16 @@ char *response_220 = "220 service ready for new user\r\n";
 char *response_221 = "221 service closing control connection\r\n";
 char *response_226 = "226 closing data connection\r\n";
 char *response_331 = "331 User okay, password required\r\n";
-
+char *response_501 = "501 syntax error in parameters or arguments\r\n";
 char *response_504 = "504 command not implemented\r\n";
+char *sandwich(const char *bread1, char *salami, const char *bread2){
+  char *wholething = malloc( sizeof(char)* (strlen(bread1)+strlen(bread2)+strlen(salami) + 1) );
+  strcpy(wholething, bread1);
+  strcat(wholething, salami);
+  strcat(wholething, bread2);
+  
+  return wholething;
+}
 int main(int argc, char **argv){
 
   // create new TCP/IP socket for control and data connections from client
@@ -59,6 +69,7 @@ int main(int argc, char **argv){
   
   // listen on the port
   int backlog = 3;// does this change to 1 since only supporting one client @ a time?
+  //or is this a back log of how many commands?? like a queue hmmmm
   listen(server_socket, backlog);
 
   // accept incoming connections
@@ -142,42 +153,81 @@ int main(int argc, char **argv){
 	send(client_socket, response_200, strlen(response_200)  ,0);	
       }
     }
+
+
+    /*
+     * List the contents of the current directory if no path arg specified,
+     * else list the contents of the directory specified by path arg
+     */
     else if(strncmp("LIST", client_message,4)==0){
-      send(client_socket,response_150,strlen(response_150) ,0);
-      system("ls > /tmp/drs5ma_ftp_server.txt");
-      FILE* tmp = fopen("/tmp/drs5ma_ftp_server.txt", "r");
-      fseek(tmp, 0, SEEK_END);
-      int ls_size = ftell(tmp);
-      fseek(tmp,0,SEEK_SET);
-      char *ls_buffer = malloc(sizeof(char)*ls_size);
-      fread (ls_buffer, sizeof(char), ls_size, tmp);
-
-      //add carriage returns and newlines as well
-      char *ptr = ls_buffer;
-      char *tok = strtok(ptr, "\n");
-      while(tok!=NULL){
-	send(data_socket, tok, strlen(tok), 0 );  
-	send(data_socket, "\r", 1, 0 );  
-	send(data_socket, "\n", 1, 0 );  
-	tok = strtok(NULL, "\n");
+      char *argptr = client_message;
+      char *tokptr = strtok(client_message," ");
+      char *systemstring = NULL;int status;
+      tokptr = strtok(NULL, " ");
+      if(tokptr==NULL){
+	systemstring = "ls > /tmp/drs5ma_ftp_server.txt";
       }
-
-      fclose(tmp);
-      system("rm /tmp/drs5ma_ftp_server.txt");
-      /* DIR *d; */
-      /* struct dirent *dir; */
-      /* d = opendir("."); */
-      /* if(d){ */
-      /* 	while( ( dir=readdir(d) ) != NULL ){ */
-      /* 	  printf("%s\n", dir->d_name); */
-      /* 	  send(data_socket,dir->d_name, strlen(dir->d_name), 0 );  */
-      /* 	  send(data_socket, "\r", 1,0); */
-      /* 	}closedir(d); */
-      /* } */
+      else{
+	tokptr[strlen(tokptr)-2] = '\0';
+	//remove the newline and space/ or carriage return ?
+	systemstring = sandwich("ls ", tokptr ," > /tmp/drs5ma_ftp_server.txt");
+      }
+      printf("systemstring:%s\n", systemstring );
+      status = system(systemstring);
+      if(tokptr!=NULL){free(systemstring);}  
+      printf("exited with status %d\n", status);
+      if(status==0x200){
+	
+      }
+      	
+      else{
+	send(client_socket,response_125,strlen(response_125) ,0);	
+	
+	
+	FILE* tmp = fopen("/tmp/drs5ma_ftp_server.txt", "r");   
+	if(tmp==NULL){
+	  printf("tmp is null error \n");
+	}
+	else{
+	  printf("file opended sucesfully\n");
+	}
+	fseek(tmp, 0, SEEK_END);
+	int ls_size = ftell(tmp);
+	fseek(tmp,0,SEEK_SET);
+	char *ls_buffer = calloc(ls_size, sizeof(char));
+	int numfread = fread (ls_buffer, sizeof(char), ls_size, tmp);
+	//ls_buffer[ls_size] = '\0';
+	//add carriage returns and newlines as well
+	char *ptr = ls_buffer;
+	if(numfread){
+	  char *tok = strtok(ptr, "\n");
+      
+	  while(tok!=NULL){
+	    printf("sending: %s\n", tok);
+	    send(data_socket, tok, strlen(tok), 0 );  
+	    send(data_socket, "\r", 1, 0 );  
+	    send(data_socket, "\n", 1, 0 );  
+	    tok = strtok(NULL, "\n");
+	  }
+	}
+	fclose(tmp);
+	free(ls_buffer);
+	system("rm /tmp/drs5ma_ftp_server.txt");
+      }
       close(data_socket);
-      free(ls_buffer);
+      
+      if(status==0x200){
+	send(client_socket, response_501, strlen(response_501), 0);
+      }
+      else{
       send(client_socket, response_226, strlen(response_226), 0);
+      }
     }
+
+
+
+
+
 
     else if(strncmp("QUIT", client_message, 4)==0){
       //send them a 221 closing control conneciton command
