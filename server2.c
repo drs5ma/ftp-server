@@ -33,10 +33,13 @@ char *response_220 = "220 service ready for new user\r\n";
 char *response_221 = "221 service closing control connection\r\n";
 char *response_226 = "226 closing data connection\r\n";
 char *response_331 = "331 User okay, password required\r\n";
+char *response_451 = "451 action aborted local processing error\r\n";
+char *response_450 = "450 requested file action not taken\r\n";
 char *response_501 = "501 syntax error in parameters or arguments\r\n";
 char *response_504 = "504 command not implemented\r\n";
+char *response_550 = "550 file not found\r\n";
 char *sandwich(const char *bread1, char *salami, const char *bread2){
-  char *wholething = malloc( sizeof(char)* (strlen(bread1)+strlen(bread2)+strlen(salami) + 1) );
+  char *wholething = malloc( sizeof(char)*(strlen(bread1)+strlen(bread2)+strlen(salami) + 1) );
   strcpy(wholething, bread1);
   strcat(wholething, salami);
   strcat(wholething, bread2);
@@ -68,7 +71,7 @@ int main(int argc, char **argv){
     return 0;} 
   
   // listen on the port
-  int backlog = 3;// does this change to 1 since only supporting one client @ a time?
+  int backlog = 5;// does this change to 1 since only supporting one client @ a time?
   //or is this a back log of how many commands?? like a queue hmmmm
   listen(server_socket, backlog);
 
@@ -160,48 +163,44 @@ int main(int argc, char **argv){
      * else list the contents of the directory specified by path arg
      */
     else if(strncmp("LIST", client_message,4)==0){
-      char *argptr = client_message;
+
       char *tokptr = strtok(client_message," ");
       char *systemstring = NULL;int status;
       tokptr = strtok(NULL, " ");
+      //check whether an arg to ls exists
       if(tokptr==NULL){
 	systemstring = "ls > /tmp/drs5ma_ftp_server.txt";
       }
       else{
-	tokptr[strlen(tokptr)-2] = '\0';
 	//remove the newline and space/ or carriage return ?
+	tokptr[strlen(tokptr)-2] = '\0';
 	systemstring = sandwich("ls ", tokptr ," > /tmp/drs5ma_ftp_server.txt");
       }
-      printf("systemstring:%s\n", systemstring );
+
+      //execute the system command and free
+      // the contents of the systemstring, only if allocated
       status = system(systemstring);
       if(tokptr!=NULL){free(systemstring);}  
-      printf("exited with status %d\n", status);
+
+      //if the ls commmand execed bad
       if(status==0x200){
-	
+	close(data_socket);
+	send(client_socket, response_501, strlen(response_501), 0);
       }
-      	
       else{
-	send(client_socket,response_125,strlen(response_125) ,0);	
-	
-	
+	//let the client know we are starting the transfer
+	send(client_socket,response_125,strlen(response_125) ,0);
+	//open this tmp file tohold  the ls contents
+	//hmmm file transfer will be easy now since im *already doing that*
 	FILE* tmp = fopen("/tmp/drs5ma_ftp_server.txt", "r");   
-	if(tmp==NULL){
-	  printf("tmp is null error \n");
-	}
-	else{
-	  printf("file opended sucesfully\n");
-	}
 	fseek(tmp, 0, SEEK_END);
 	int ls_size = ftell(tmp);
 	fseek(tmp,0,SEEK_SET);
 	char *ls_buffer = calloc(ls_size, sizeof(char));
 	int numfread = fread (ls_buffer, sizeof(char), ls_size, tmp);
-	//ls_buffer[ls_size] = '\0';
-	//add carriage returns and newlines as well
 	char *ptr = ls_buffer;
 	if(numfread){
 	  char *tok = strtok(ptr, "\n");
-      
 	  while(tok!=NULL){
 	    printf("sending: %s\n", tok);
 	    send(data_socket, tok, strlen(tok), 0 );  
@@ -213,25 +212,80 @@ int main(int argc, char **argv){
 	fclose(tmp);
 	free(ls_buffer);
 	system("rm /tmp/drs5ma_ftp_server.txt");
+	close(data_socket);
+	send(client_socket, response_226, strlen(response_226), 0);
       }
-      close(data_socket);
+    }
+    /* END LIST */
+
+    /*
+     * RETR <FILE>
+     * <FILE> is a mandatory arg
+     * /usr/bin/ftp wont send a retr cmd w/out an arg :):)
+     */
+    
+    else if(strncmp("RETR", client_message, 4)==0){
+      //data socket already opened
+      //if the file exists.. 
       
-      if(status==0x200){
-	send(client_socket, response_501, strlen(response_501), 0);
+      char *filename = strtok(client_message," ");
+      char *systemstring = NULL;int status;
+      filename = strtok(NULL, " ");
+
+      filename[strlen(filename)-2] = '\0';
+      
+      FILE* isfileopen = fopen(filename, "r");
+      if(isfileopen){
+      	//read it and send contents! first lets inform client wea
+	//are starting transfer
+      	send(client_socket,response_125,strlen(response_125) ,0);
+	fseek(isfileopen, 0, SEEK_END);
+	int filesize = ftell(isfileopen);
+	fseek(isfileopen, 0, SEEK_SET);
+	char *filebuffer = calloc(sizeof(char), sizeof(char)*filesize);
+	fread(filebuffer,sizeof(char),filesize, isfileopen);
+      	fclose(isfileopen);
+	send(data_socket, filebuffer, filesize*sizeof(char), 0);
+	free(filebuffer);
+      	close(data_socket);
+      	send(client_socket, response_226, strlen(response_226), 0);
       }
       else{
-      send(client_socket, response_226, strlen(response_226), 0);
+      	printf("file does not exist\n");
+      	close(data_socket);
+      	send(client_socket, response_451, strlen(response_451), 0);
+      	//file doesnt exist
       }
     }
 
-
-
-
-
+    else if(strncmp("STOR", client_message, 4)==0){
+      
+       char *filename = strtok(client_message," ");
+      char *systemstring = NULL;int status;
+      filename = strtok(NULL, " ");
+      filename[strlen(filename)-2] = '\0';
+       printf("STOR opening file: %s\n", filename);
+       send(client_socket,response_125,strlen(response_125) ,0);
+      FILE *newfile = fopen(filename, "w");
+      int blocksize = 512;      
+      char *buffer = malloc(sizeof(char)*blocksize);
+      int num_read = blocksize;
+      while(num_read == blocksize){
+	 num_read = recv(data_socket, buffer, blocksize, 0);
+	 fwrite(buffer, sizeof(char), num_read, newfile);	
+      }
+      free(buffer);
+      fclose(newfile);
+      close(data_socket);
+      send(client_socket, response_226, strlen(response_226), 0);
+    }
 
     else if(strncmp("QUIT", client_message, 4)==0){
       //send them a 221 closing control conneciton command
       send(client_socket, response_221, strlen(response_221), 0);
+    }
+    else if (strncmp("TYPE", client_message, 4)==0){
+      send(client_socket, response_200, strlen(response_200), 0);
     }
     else{
       //send them a 504 command not implemented i guess
